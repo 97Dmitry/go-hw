@@ -1,2 +1,5 @@
 start-gateway:
-	@go run gateway/cmd/server/main.go
+	@go -C gateway run ./cmd/server
+
+start-ledger:
+	@go -C ledger run ./cmd/server
