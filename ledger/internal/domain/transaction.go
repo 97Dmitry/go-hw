@@ -6,6 +6,7 @@ import (
 )
 
 var ErrInvalidAmount = errors.New("amount must not be negative")
+var ErrInvalidCategory = errors.New("category must not be empty")
 
 // Transaction — финансовая операция.
 type Transaction struct {
@@ -19,6 +20,10 @@ type Transaction struct {
 func (t Transaction) Validate() error {
 	if t.Amount < 0 {
 		return ErrInvalidAmount
+	}
+
+	if t.Category == "" {
+		return ErrInvalidCategory
 	}
 
 	return nil

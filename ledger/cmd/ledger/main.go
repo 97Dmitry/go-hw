@@ -29,6 +29,14 @@ type BudgetJSON struct {
 	Period   BudgetJSONPeriod `json:"period"`
 }
 
+type Validatable interface {
+	Validate() error
+}
+
+func CheckValid(v Validatable) error {
+	return v.Validate()
+}
+
 func run() error {
 	budgetRepo := memory.NewBudgetRepository()
 	budgetService := service.NewBudgetService(budgetRepo)
@@ -50,20 +58,26 @@ func run() error {
 		log.Fatalf("Failed to unmarshal JSON: %v", err)
 	}
 
-	for _, budget := range budgetSeedJSON {
+	for _, budgetJSON := range budgetSeedJSON {
 		var period domain.Period
-		if start, err := time.Parse("2006-01-02", budget.Period.Start); err != nil {
+		if start, err := time.Parse("2006-01-02", budgetJSON.Period.Start); err != nil {
 			panic("could not parse budget period start")
 		} else {
 			period.Start = start
 			period.End = start.AddDate(0, 1, 0)
 		}
 
-		if _, err := budgetService.Add(domain.Budget{
-			Category: budget.Category,
-			Limit:    budget.Limit,
+		budget := domain.Budget{
+			Category: budgetJSON.Category,
+			Limit:    budgetJSON.Limit,
 			Period:   period,
-		}); err != nil {
+		}
+
+		if err := CheckValid(&budget); err != nil {
+			return fmt.Errorf("check budget valid %w", err)
+		}
+
+		if _, err := budgetService.Add(budget); err != nil {
 			return fmt.Errorf("add budget %q: %w", budget.Category, err)
 		}
 	}
@@ -93,6 +107,10 @@ func run() error {
 	}
 
 	for _, tx := range transactionSeed {
+		if err := CheckValid(&tx); err != nil {
+			return fmt.Errorf("check transaction valid %w", err)
+		}
+
 		if _, err := transactionService.AddTransaction(tx); err != nil {
 			return fmt.Errorf("add transaction %q: %w", tx.Description, err)
 		}
