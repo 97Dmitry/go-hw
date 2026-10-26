@@ -39,6 +39,12 @@ curl -i http://localhost:8081/api/transactions
 ## Проверка
 
 ```bash
-go -C gateway test ./...
-go -C ledger test ./...
+go test ./ledger/... ./gateway/...
+go test -race ./ledger/... ./gateway/...
+go test ./ledger/... ./gateway/... -coverpkg=./ledger/...,./gateway/... -cover -coverprofile=cover.out
+go tool cover -html=cover.out -o cover.html
 ```
+
+Команды выполняются из корня репозитория: `go test ./...` здесь не подходит, поскольку корень не является Go-модулем. Покрытие тестами обоих модулей — **62,4%** statements, включая `cmd` (точки входа не покрыты). `cover.out` и `cover.html` создаются локально и не коммитятся.
+
+Unit-тесты проверяют валидацию транзакций и бюджетов, границу лимита и отсутствие записи при превышении. HTTP-тесты запускают настоящий роутер с in-memory Ledger и проверяют JSON, статусы и Content-Type. Каждый сценарий создаёт `ledger.New()` с независимыми коллекциями, поэтому глобальный `Reset()` не нужен. Только чистые проверки `Validate()` выполняются параллельно. Даты HTTP-запросов используют существующий формат RFC 3339 и месяц созданного бюджета.

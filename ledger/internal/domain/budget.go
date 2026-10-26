@@ -43,7 +43,7 @@ func (b *Budget) Validate() error {
 		return fmt.Errorf("invalid category")
 	}
 
-	if b.Limit < 0 {
+	if b.Limit <= 0 {
 		return fmt.Errorf("invalid limit")
 	}
 
