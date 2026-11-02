@@ -1,50 +1,32 @@
 # Go HW 2
 
-## Требования
+Gateway предоставляет HTTP API, Ledger хранит помесячные бюджеты и расходы в PostgreSQL и кеширует отчёты в Redis с TTL 30 секунд. Gateway использует Ledger как библиотеку в своём процессе; отдельного сетевого сервиса Ledger нет.
 
-Go 1.27.1+ и Make. `gateway` и `ledger` — отдельные Go-модули. Корневой `go.work` объединяет их при разработке; `gateway/go.mod` также содержит `require` и локальный `replace` для запуска без workspace.
+Требуются Go 1.27.1+, Docker Compose (либо локальные PostgreSQL и Redis), Goose. `gateway` и `ledger` — отдельные Go-модули, объединённые `go.work`.
 
-## Запуск HTTP API
+- [Ledger: создание БД, установка Goose, миграции up/down, env, бизнес-правила и кеш](ledger/README.md).
+- [Gateway: запуск и cURL, включая повторный запрос отчёта](gateway/README.md).
 
-```bash
-make start-gateway
-```
-
-Сервер слушает `http://localhost:8081`. Gateway создаёт ledger-сервис в своём процессе; данные хранятся в памяти и исчезают после перезапуска. `make start-ledger` запускает отдельный учебный консольный пример со своим хранилищем, не общий сервер данных.
-
-## Эндпоинты
+Порядок: PostgreSQL/Redis → `goose up` → Ledger → Gateway → HTTP-проверка. Подробные команды находятся в README сервисов.
 
 | Метод | Путь | Назначение |
 | --- | --- | --- |
-| `POST` | `/api/budgets` | Создать или обновить бюджет категории на текущий месяц UTC |
-| `GET` | `/api/budgets` | Список бюджетов |
-| `POST` | `/api/transactions` | Создать транзакцию в пределах бюджета |
-| `GET` | `/api/transactions` | Список транзакций |
-
-Для создания бюджета нужны `category` и `limit`. Повторный POST для той же категории и месяца обновляет бюджет и сохраняет ID. Для транзакции нужны `amount`, `category`, `description`, `date`; `date` задаётся в RFC 3339. При отсутствии бюджета или превышении лимита сервер отвечает `409`, при ошибке JSON/валидации — `400`. Ошибки имеют вид `{"error":"..."}`. Пустые списки возвращаются как `[]`. Все ответы используют `Content-Type: application/json; charset=utf-8`.
-
-```bash
-curl -i -X POST http://localhost:8081/api/budgets \
-  -H 'Content-Type: application/json' \
-  -d '{"category":"food","limit":1000}'
-
-curl -i -X POST http://localhost:8081/api/transactions \
-  -H 'Content-Type: application/json' \
-  -d "{\"amount\":150,\"category\":\"food\",\"description\":\"lunch\",\"date\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}"
-
-curl -i http://localhost:8081/api/budgets
-curl -i http://localhost:8081/api/transactions
-```
+| POST | `/api/budgets` | Создать/обновить бюджет категории на текущий месяц UTC |
+| GET | `/api/budgets` | Список бюджетов из PostgreSQL |
+| POST | `/api/transactions` | Добавить расход в пределах месячного бюджета |
+| GET | `/api/transactions` | Список расходов из PostgreSQL |
+| GET | `/api/reports/summary?from=YYYY-MM-DD&to=YYYY-MM-DD` | Сумма расходов по категориям за `[from,to)`, кеш Redis |
 
 ## Проверка
+
+Из корня репозитория:
 
 ```bash
 go test ./ledger/... ./gateway/...
 go test -race ./ledger/... ./gateway/...
-go test ./ledger/... ./gateway/... -coverpkg=./ledger/...,./gateway/... -cover -coverprofile=cover.out
-go tool cover -html=cover.out -o cover.html
+go vet ./ledger/... ./gateway/...
+# После миграций, с DATABASE_URL и REDIS_* для изолированного тестового стенда:
+LEDGER_INTEGRATION=1 go test -race ./ledger/... ./gateway/...
 ```
 
-Команды выполняются из корня репозитория: `go test ./...` здесь не подходит, поскольку корень не является Go-модулем. Покрытие тестами обоих модулей — **62,4%** statements, включая `cmd` (точки входа не покрыты). `cover.out` и `cover.html` создаются локально и не коммитятся.
-
-Unit-тесты проверяют валидацию транзакций и бюджетов, границу лимита и отсутствие записи при превышении. HTTP-тесты запускают настоящий роутер с in-memory Ledger и проверяют JSON, статусы и Content-Type. Каждый сценарий создаёт `ledger.New()` с независимыми коллекциями, поэтому глобальный `Reset()` не нужен. Только чистые проверки `Validate()` выполняются параллельно. Даты HTTP-запросов используют существующий формат RFC 3339 и месяц созданного бюджета.
+Интеграционный тест пишет через код Ledger и оставляет уникальные тестовые записи. Обычные тесты инфраструктуру не требуют. `go test ./...` из корня не подходит: корень не является Go-модулем.

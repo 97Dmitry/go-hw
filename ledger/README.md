@@ -1,0 +1,59 @@
+# Ledger
+
+Ledger хранит бюджеты и расходы в PostgreSQL, отчёты кеширует в Redis на 30 секунд. `ledger.Open(ctx)` подключает рабочее хранилище; `ledger.New()` оставлен для независимых in-memory тестов.
+
+## PostgreSQL, Redis и миграции
+
+Команды ниже выполняются из корня репозитория. Требуются Go 1.27.1+, Docker Compose.
+
+```bash
+docker compose up -d --wait
+export DATABASE_URL='postgres://postgres:postgres@localhost:55432/cashapp?sslmode=disable'
+export REDIS_ADDR='localhost:56379'
+export REDIS_DB=0
+export REDIS_PASSWORD=''
+
+go install -tags 'no_clickhouse no_libsql no_mssql no_mysql no_sqlite3 no_vertica no_ydb' github.com/pressly/goose/v3/cmd/goose@v3.26.0
+export PATH="$(go env GOPATH)/bin:$PATH"
+goose -dir ./ledger/migrations postgres "$DATABASE_URL" up
+make start-ledger
+```
+
+Compose создаёт БД `cashapp` с пользователем/паролем `postgres/postgres`. Данные PostgreSQL сохраняются в именованном Docker volume. Порты привязаны к localhost. Это настройки локальной разработки. Для уже установленного PostgreSQL создайте пустую БД `cashapp` через `createdb cashapp` под пользователем с соответствующими правами и укажите свой `DATABASE_URL`. Для локального Redis стандартный адрес — `localhost:6379`.
+
+Если `DATABASE_URL` пуст, DSN собирается из `DB_HOST=localhost`, `DB_PORT=5432`, `DB_USER=postgres`, `DB_PASS=postgres`, `DB_NAME=cashapp`, с `sslmode=disable`. Спецсимволы логина/пароля экранируются. Redis использует `REDIS_ADDR=localhost:6379`, `REDIS_DB=0`, необязательный `REDIS_PASSWORD`. Для каждой БД приложения используйте отдельную Redis DB, чтобы ключи отчётов не пересекались.
+
+При старте проверяются оба подключения; ошибка завершает приложение. Успешные подключения логируются без DSN и паролей. Пул PostgreSQL: 10 открытых, 5 свободных подключений, lifetime 30 минут. Операции БД ограничены пятью секундами.
+
+Goose применяют **до запуска** приложения. Два SQL-файла содержат каждый секции `-- +goose Up` и `-- +goose Down` — это формат Goose, отдельные `.up.sql`/`.down.sql` не используются.
+
+```bash
+goose -dir ./ledger/migrations postgres "$DATABASE_URL" status
+# Откат одной миграции (удалит expenses вместе с расходами):
+goose -dir ./ledger/migrations postgres "$DATABASE_URL" down
+# Второй down удалит budgets. Повторный up восстановит схему, но не данные.
+```
+
+Останавливать инфраструктуру без удаления сохранённых данных: `docker compose down`. Не добавляйте `-v`, если данные нужны.
+
+## Бизнес-правила
+
+Бюджет относится к календарному месяцу UTC, уникален по `(category, month)`. Повторная запись обновляет лимит с сохранением ID. Валидация периода и положительных сумм сохранена; суммы должны иметь не больше двух десятичных знаков и помещаться в `NUMERIC(14,2)`.
+
+Без бюджета на месяц расход отклоняется. Проверка суммы расходов и вставка выполняются в SQL-транзакции: `SELECT ... FOR UPDATE` блокирует строку бюджета. Это защищает лимит между разными экземплярами Ledger. Суммирование и сравнение выполняются в PostgreSQL как NUMERIC. Расходы возвращаются по `date DESC, id DESC`, бюджеты — по категории и месяцу. Поле `date DATE` хранит день UTC: время суток не сохраняется, HTTP возвращает RFC 3339 с полуночью UTC.
+
+`GetReportSummary(ctx, from, to)` возвращает `[{"category":"food","total":60}]` за полуоткрытый интервал `[from,to)` по датам UTC; пустой отчёт — `[]`. Ключ `report:summary:YYYY-MM-DD:YYYY-MM-DD`, JSON, TTL 30 секунд. При попадании/промахе пишется лог. Повреждённый или недоступный кеш приводит к расчёту через БД. После записи расхода отчёт может оставаться прежним до 30 секунд; инвалидирования и кеширования бюджетов нет.
+
+## Запуск и проверка
+
+Консольная команда Ledger подключается к инфраструктуре и ждёт SIGINT/SIGTERM. Gateway **встраивает Ledger в собственный процесс**, используя ту же БД и Redis; отдельного RPC/HTTP-сервера Ledger нет. Поэтому отдельный процесс Ledger не обязателен для HTTP, но его запуск позволяет проверить подключения. Затем в другом терминале с теми же env запустите `make start-gateway`.
+
+Примеры HTTP, включая двукратный запрос отчёта: [Gateway README](../gateway/README.md).
+
+```bash
+go test ./ledger/... ./gateway/...
+# Только против отдельной мигрированной учебной БД/Redis:
+LEDGER_INTEGRATION=1 go test -race ./ledger/... ./gateway/...
+```
+
+Интеграционный тест добавляет записи с уникальной категорией, проверяет UPSERT, разные месяцы, конкурентное превышение лимита, отчёт и повторное открытие хранилища. Записи остаются в тестовой БД. Без `LEDGER_INTEGRATION=1` он пропускается.

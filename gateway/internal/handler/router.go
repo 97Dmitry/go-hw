@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -14,9 +15,10 @@ import (
 
 type ledgerService interface {
 	AddTransaction(ledger.Transaction) (ledger.Transaction, error)
-	ListTransactions() []ledger.Transaction
+	ListTransactions() ([]ledger.Transaction, error)
+	GetReportSummary(context.Context, time.Time, time.Time) ([]ledger.CategoryTotal, error)
 	SetBudget(ledger.Budget) (ledger.Budget, error)
-	ListBudgets() []ledger.Budget
+	ListBudgets() ([]ledger.Budget, error)
 }
 
 func NewRouter(store ledgerService) http.Handler {
@@ -59,7 +61,13 @@ func NewRouter(store ledgerService) http.Handler {
 
 	mux.HandleFunc("GET /api/transactions", func(w http.ResponseWriter, _ *http.Request) {
 		result := make([]api.TransactionResponse, 0)
-		for _, tx := range store.ListTransactions() {
+		txs, err := store.ListTransactions()
+		if err != nil {
+			log.Printf("list transactions: %v", err)
+			writeError(w, 500, "internal server error")
+			return
+		}
+		for _, tx := range txs {
 			result = append(result, api.TransactionFromDomain(tx))
 		}
 		writeJSON(w, http.StatusOK, result)
@@ -87,10 +95,31 @@ func NewRouter(store ledgerService) http.Handler {
 
 	mux.HandleFunc("GET /api/budgets", func(w http.ResponseWriter, _ *http.Request) {
 		result := make([]api.BudgetResponse, 0)
-		for _, b := range store.ListBudgets() {
+		budgets, err := store.ListBudgets()
+		if err != nil {
+			log.Printf("list budgets: %v", err)
+			writeError(w, 500, "internal server error")
+			return
+		}
+		for _, b := range budgets {
 			result = append(result, api.BudgetFromDomain(b))
 		}
 		writeJSON(w, http.StatusOK, result)
+	})
+	mux.HandleFunc("GET /api/reports/summary", func(w http.ResponseWriter, r *http.Request) {
+		from, e1 := time.Parse("2006-01-02", r.URL.Query().Get("from"))
+		to, e2 := time.Parse("2006-01-02", r.URL.Query().Get("to"))
+		if e1 != nil || e2 != nil || !from.Before(to) {
+			writeError(w, 400, "from and to must be YYYY-MM-DD with from < to (exclusive)")
+			return
+		}
+		result, err := store.GetReportSummary(r.Context(), from, to)
+		if err != nil {
+			log.Printf("report summary: %v", err)
+			writeError(w, 500, "internal server error")
+			return
+		}
+		writeJSON(w, 200, result)
 	})
 	return logging(jsonContentType(mux))
 }

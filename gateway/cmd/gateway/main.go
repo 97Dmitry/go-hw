@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"log"
 	"net/http"
 	"time"
@@ -10,11 +11,22 @@ import (
 )
 
 func main() {
+	if err := run(); err != nil {
+		log.Fatal(err)
+	}
+}
+
+func run() error {
+	store, err := ledger.Open(context.Background())
+	if err != nil {
+		return err
+	}
+	defer store.Close()
 	srv := &http.Server{
 		Addr:              ":8081",
-		Handler:           handler.NewRouter(ledger.New()),
+		Handler:           handler.NewRouter(store),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
-	log.Fatal(srv.ListenAndServe())
+	return srv.ListenAndServe()
 }

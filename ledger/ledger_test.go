@@ -89,7 +89,7 @@ func TestLedgerBudgetLimit(t *testing.T) {
 				}
 				want = append(want, saved)
 			}
-			if got := store.ListTransactions(); !reflect.DeepEqual(got, want) {
+			if got, err := store.ListTransactions(); err != nil || !reflect.DeepEqual(got, want) {
 				t.Fatalf("transactions = %+v, want %+v", got, want)
 			}
 		})
@@ -105,7 +105,34 @@ func TestLedgerIsolation(t *testing.T) {
 	if _, err := first.AddTransaction(ledger.Transaction{Amount: 100, Category: "еда", Date: date}); err != nil {
 		t.Fatal(err)
 	}
-	if len(second.ListBudgets()) != 0 || len(second.ListTransactions()) != 0 {
+	budgets, err := second.ListBudgets()
+	if err != nil {
+		t.Fatal(err)
+	}
+	txs, err := second.ListTransactions()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(budgets) != 0 || len(txs) != 0 {
 		t.Fatal("ledger instances share state")
+	}
+}
+
+func TestMoneyPrecision(t *testing.T) {
+	for _, amount := range []float64{0.001, 1.005, 1e14, 1e-8, 0.010000001} {
+		tx := ledger.Transaction{Amount: amount, Category: "food"}
+		b := ledger.Budget{Limit: amount, Category: "food", Period: ledger.MonthPeriod(time.Now())}
+		if tx.Validate() == nil || b.Validate() == nil {
+			t.Fatalf("unrepresentable NUMERIC(14,2) value accepted: %v", amount)
+		}
+	}
+}
+
+func TestMoneyValidCents(t *testing.T) {
+	for _, amount := range []float64{0.01, 0.29, 670546325022.57, 999999999999.99} {
+		tx := ledger.Transaction{Amount: amount, Category: "food"}
+		if err := tx.Validate(); err != nil {
+			t.Fatalf("valid cents %v rejected: %v", amount, err)
+		}
 	}
 }
