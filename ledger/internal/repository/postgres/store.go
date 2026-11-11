@@ -9,15 +9,39 @@ import (
 	"github.com/97Dmitry/go-hw/ledger/internal/domain"
 )
 
-type Store struct{ DB *sql.DB }
+type queryer interface {
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
+}
 
-func (s *Store) SetBudget(ctx context.Context, b domain.Budget) (domain.Budget, error) {
-	b.Period = domain.MonthPeriod(b.Period.Start)
-	err := s.DB.QueryRowContext(ctx, `INSERT INTO budgets(category,month,limit_amount) VALUES($1,$2,$3) ON CONFLICT(category,month) DO UPDATE SET limit_amount=EXCLUDED.limit_amount RETURNING id,limit_amount`, b.Category, b.Period.Start, b.Limit).Scan(&b.ID, &b.Limit)
+type Store struct{ DB *sql.DB }
+type BudgetRepository struct {
+	query queryer
+	lock  bool
+}
+type TransactionRepository struct{ query queryer }
+
+func (s *Store) Budgets() *BudgetRepository           { return &BudgetRepository{query: s.DB} }
+func (s *Store) Transactions() *TransactionRepository { return &TransactionRepository{query: s.DB} }
+
+func (s *Store) WithinTransaction(ctx context.Context, fn func(domain.BudgetRepository, domain.TransactionRepository) error) error {
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if err := fn(&BudgetRepository{query: tx, lock: true}, &TransactionRepository{query: tx}); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (s *BudgetRepository) Set(ctx context.Context, b domain.Budget) (domain.Budget, error) {
+	err := s.query.QueryRowContext(ctx, `INSERT INTO budgets(category,month,limit_amount) VALUES($1,$2,$3) ON CONFLICT(category,month) DO UPDATE SET limit_amount=EXCLUDED.limit_amount RETURNING id,limit_amount`, b.Category, b.Period.Start, b.Limit).Scan(&b.ID, &b.Limit)
 	return b, err
 }
-func (s *Store) ListBudgets(ctx context.Context) ([]domain.Budget, error) {
-	rows, err := s.DB.QueryContext(ctx, `SELECT id,category,limit_amount,month FROM budgets ORDER BY category,month`)
+func (s *BudgetRepository) List(ctx context.Context) ([]domain.Budget, error) {
+	rows, err := s.query.QueryContext(ctx, `SELECT id,category,limit_amount,month FROM budgets ORDER BY category,month`)
 	if err != nil {
 		return nil, err
 	}
@@ -34,38 +58,12 @@ func (s *Store) ListBudgets(ctx context.Context) ([]domain.Budget, error) {
 	}
 	return result, rows.Err()
 }
-func (s *Store) AddTransaction(ctx context.Context, t domain.Transaction) (domain.Transaction, error) {
-	tx, err := s.DB.BeginTx(ctx, nil)
-	if err != nil {
-		return t, err
-	}
-	defer tx.Rollback()
-	period := domain.MonthPeriod(t.Date)
-	var limit float64
-	err = tx.QueryRowContext(ctx, `SELECT limit_amount FROM budgets WHERE category=$1 AND month=$2 FOR UPDATE`, t.Category, period.Start).Scan(&limit)
-	if errors.Is(err, sql.ErrNoRows) {
-		return t, domain.ErrBudgetNotFound
-	}
-	if err != nil {
-		return t, err
-	}
-	// Compare in PostgreSQL NUMERIC so rounding matches the persisted cents.
-	var allowed bool
-	err = tx.QueryRowContext(ctx, `SELECT COALESCE(SUM(amount),0)+$4::numeric(14,2) <= $5::numeric(14,2) FROM expenses WHERE category=$1 AND date >= $2 AND date < $3`, t.Category, period.Start, period.End, t.Amount, limit).Scan(&allowed)
-	if err != nil {
-		return t, err
-	}
-	if !allowed {
-		return t, domain.ErrBudgetExceeded
-	}
-	err = tx.QueryRowContext(ctx, `INSERT INTO expenses(amount,category,description,date) VALUES($1,$2,$3,$4) RETURNING id,amount,date`, t.Amount, t.Category, t.Description, t.Date.UTC()).Scan(&t.ID, &t.Amount, &t.Date)
-	if err != nil {
-		return t, err
-	}
-	return t, tx.Commit()
+func (s *TransactionRepository) Add(ctx context.Context, t domain.Transaction) (domain.Transaction, error) {
+	err := s.query.QueryRowContext(ctx, `INSERT INTO expenses(amount,category,description,date) VALUES($1,$2,$3,$4) RETURNING id,amount,date`, t.Amount, t.Category, t.Description, t.Date.UTC()).Scan(&t.ID, &t.Amount, &t.Date)
+	return t, err
 }
-func (s *Store) ListTransactions(ctx context.Context) ([]domain.Transaction, error) {
-	rows, err := s.DB.QueryContext(ctx, `SELECT id,amount,category,COALESCE(description,''),date FROM expenses ORDER BY date DESC,id DESC`)
+func (s *TransactionRepository) List(ctx context.Context) ([]domain.Transaction, error) {
+	rows, err := s.query.QueryContext(ctx, `SELECT id,amount,category,COALESCE(description,''),date FROM expenses ORDER BY date DESC,id DESC`)
 	if err != nil {
 		return nil, err
 	}
@@ -80,8 +78,8 @@ func (s *Store) ListTransactions(ctx context.Context) ([]domain.Transaction, err
 	}
 	return result, rows.Err()
 }
-func (s *Store) Summary(ctx context.Context, from, to time.Time) ([]domain.CategoryTotal, error) {
-	rows, err := s.DB.QueryContext(ctx, `SELECT category,SUM(amount) FROM expenses WHERE date >= $1 AND date < $2 GROUP BY category ORDER BY category`, from, to)
+func (s *TransactionRepository) Summary(ctx context.Context, from, to time.Time) ([]domain.CategoryTotal, error) {
+	rows, err := s.query.QueryContext(ctx, `SELECT category,SUM(amount) FROM expenses WHERE date >= $1 AND date < $2 GROUP BY category ORDER BY category`, from, to)
 	if err != nil {
 		return nil, err
 	}
@@ -96,3 +94,34 @@ func (s *Store) Summary(ctx context.Context, from, to time.Time) ([]domain.Categ
 	}
 	return result, rows.Err()
 }
+
+func (s *BudgetRepository) Add(ctx context.Context, b domain.Budget) (domain.Budget, error) {
+	err := s.query.QueryRowContext(ctx, `INSERT INTO budgets(category,month,limit_amount) VALUES($1,$2,$3) ON CONFLICT(category,month) DO NOTHING RETURNING id,limit_amount`, b.Category, b.Period.Start, b.Limit).Scan(&b.ID, &b.Limit)
+	if errors.Is(err, sql.ErrNoRows) {
+		return domain.Budget{}, domain.ErrBudgetExists
+	}
+	return b, err
+}
+
+func (s *BudgetRepository) GetByCategory(ctx context.Context, category string, date time.Time) (domain.Budget, error) {
+	b := domain.Budget{Category: category, Period: domain.MonthPeriod(date)}
+	query := `SELECT id,limit_amount FROM budgets WHERE category=$1 AND month=$2`
+	if s.lock {
+		query += ` FOR UPDATE`
+	}
+	err := s.query.QueryRowContext(ctx, query, category, b.Period.Start).Scan(&b.ID, &b.Limit)
+	if errors.Is(err, sql.ErrNoRows) {
+		return domain.Budget{}, domain.ErrBudgetNotFound
+	}
+	return b, err
+}
+
+func (s *TransactionRepository) SumByCategory(ctx context.Context, category string, period domain.Period) (int64, error) {
+	var cents int64
+	err := s.query.QueryRowContext(ctx, `SELECT (COALESCE(SUM(amount),0)*100)::bigint FROM expenses WHERE category=$1 AND date >= $2 AND date < $3`, category, period.Start, period.End).Scan(&cents)
+	return cents, err
+}
+
+var _ domain.BudgetRepository = (*BudgetRepository)(nil)
+var _ domain.TransactionRepository = (*TransactionRepository)(nil)
+var _ domain.UnitOfWork = (*Store)(nil)

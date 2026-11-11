@@ -1,7 +1,6 @@
 package handler
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -13,15 +12,7 @@ import (
 	"github.com/97Dmitry/go-hw/ledger"
 )
 
-type ledgerService interface {
-	AddTransaction(ledger.Transaction) (ledger.Transaction, error)
-	ListTransactions() ([]ledger.Transaction, error)
-	GetReportSummary(context.Context, time.Time, time.Time) ([]ledger.CategoryTotal, error)
-	SetBudget(ledger.Budget) (ledger.Budget, error)
-	ListBudgets() ([]ledger.Budget, error)
-}
-
-func NewRouter(store ledgerService) http.Handler {
+func NewRouter(store ledger.Service) http.Handler {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("/", func(w http.ResponseWriter, _ *http.Request) {

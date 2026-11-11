@@ -1,6 +1,7 @@
 package memory
 
 import (
+	"context"
 	"maps"
 	"slices"
 	"sync"
@@ -36,7 +37,7 @@ func NewBudgetRepository() *BudgetRepository {
 	}
 }
 
-func (r *BudgetRepository) Add(b domain.Budget) (domain.Budget, error) {
+func (r *BudgetRepository) Add(_ context.Context, b domain.Budget) (domain.Budget, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -53,7 +54,7 @@ func (r *BudgetRepository) Add(b domain.Budget) (domain.Budget, error) {
 }
 
 // Set создаёт бюджет или заменяет существующий на тот же месяц, сохраняя его ID.
-func (r *BudgetRepository) Set(b domain.Budget) (domain.Budget, error) {
+func (r *BudgetRepository) Set(_ context.Context, b domain.Budget) (domain.Budget, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -70,7 +71,7 @@ func (r *BudgetRepository) Set(b domain.Budget) (domain.Budget, error) {
 }
 
 // GetByCategory возвращает бюджет категории на месяц, в который попадает date.
-func (r *BudgetRepository) GetByCategory(category string, date time.Time) (domain.Budget, error) {
+func (r *BudgetRepository) GetByCategory(_ context.Context, category string, date time.Time) (domain.Budget, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
@@ -82,9 +83,9 @@ func (r *BudgetRepository) GetByCategory(category string, date time.Time) (domai
 	return b, nil
 }
 
-func (r *BudgetRepository) List() []domain.Budget {
+func (r *BudgetRepository) List(_ context.Context) ([]domain.Budget, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	return slices.Collect(maps.Values(r.budgets))
+	return slices.Collect(maps.Values(r.budgets)), nil
 }

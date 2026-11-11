@@ -136,3 +136,50 @@ func TestMoneyValidCents(t *testing.T) {
 		}
 	}
 }
+
+func TestExactCentsLimit(t *testing.T) {
+	store := ledger.New()
+	date := time.Now()
+	if _, err := store.SetBudget(ledger.Budget{Category: "cents", Limit: 0.30, Period: ledger.MonthPeriod(date)}); err != nil {
+		t.Fatal(err)
+	}
+	for _, amount := range []float64{0.10, 0.20} {
+		if _, err := store.AddTransaction(ledger.Transaction{Category: "cents", Amount: amount, Date: date}); err != nil {
+			t.Fatalf("exact cents rejected: %v", err)
+		}
+	}
+	if _, err := store.AddTransaction(ledger.Transaction{Category: "cents", Amount: 0.01, Date: date}); !errors.Is(err, ledger.ErrBudgetExceeded) {
+		t.Fatalf("extra cent accepted: %v", err)
+	}
+	txs, err := store.ListTransactions()
+	if err != nil || len(txs) != 2 {
+		t.Fatalf("rejected expense saved: %v %v", txs, err)
+	}
+}
+
+func TestConcurrentExpenses(t *testing.T) {
+	store := ledger.New()
+	date := time.Now()
+	if _, err := store.SetBudget(ledger.Budget{Category: "concurrent", Limit: 100, Period: ledger.MonthPeriod(date)}); err != nil {
+		t.Fatal(err)
+	}
+	results := make(chan error, 20)
+	for range 20 {
+		go func() {
+			_, err := store.AddTransaction(ledger.Transaction{Category: "concurrent", Amount: 60, Date: date})
+			results <- err
+		}()
+	}
+	successes := 0
+	for range 20 {
+		err := <-results
+		if err == nil {
+			successes++
+		} else if !errors.Is(err, ledger.ErrBudgetExceeded) {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	}
+	if successes != 1 {
+		t.Fatalf("want one success, got %d", successes)
+	}
+}

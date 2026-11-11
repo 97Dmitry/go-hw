@@ -17,11 +17,11 @@ func TestPersistence(t *testing.T) {
 		t.Skip("set LEDGER_INTEGRATION=1 against migrated isolated PostgreSQL and Redis")
 	}
 	ctx := context.Background()
-	store, err := ledger.Open(ctx)
+	store, closeStore, err := ledger.Open(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer store.Close()
+	defer closeStore()
 	date := time.Date(2100+int(time.Now().UnixNano()%7000), 2, 10, 12, 0, 0, 0, time.UTC)
 	category := fmt.Sprintf("test-%d", time.Now().UnixNano())
 	b := ledger.Budget{Category: category, Limit: 100, Period: ledger.MonthPeriod(date)}
@@ -41,14 +41,14 @@ func TestPersistence(t *testing.T) {
 	if _, err := store.SetBudget(b); err != nil {
 		t.Fatal(err)
 	}
-	other, err := ledger.Open(ctx)
+	other, closeOther, err := ledger.Open(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer other.Close()
+	defer closeOther()
 	var wg sync.WaitGroup
 	results := make(chan error, 2)
-	for _, writer := range []*ledger.Ledger{store, other} {
+	for _, writer := range []ledger.Service{store, other} {
 		wg.Go(func() {
 			_, err := writer.AddTransaction(ledger.Transaction{Amount: 60, Category: category, Date: date})
 			results <- err
@@ -89,11 +89,11 @@ func TestPersistence(t *testing.T) {
 	if _, err := store.GetReportSummary(ctx, from, to); err != nil {
 		t.Fatal(err)
 	}
-	reopened, err := ledger.Open(ctx)
+	reopened, closeReopened, err := ledger.Open(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer reopened.Close()
+	defer closeReopened()
 	txs, err := reopened.ListTransactions()
 	if err != nil {
 		t.Fatal(err)

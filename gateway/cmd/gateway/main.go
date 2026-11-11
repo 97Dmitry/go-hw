@@ -17,11 +17,11 @@ func main() {
 }
 
 func run() error {
-	store, err := ledger.Open(context.Background())
+	store, closeFn, err := ledger.Open(context.Background())
 	if err != nil {
 		return err
 	}
-	defer store.Close()
+	defer closeFn()
 	srv := &http.Server{
 		Addr:              ":8081",
 		Handler:           handler.NewRouter(store),

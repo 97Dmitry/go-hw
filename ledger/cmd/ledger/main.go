@@ -17,11 +17,11 @@ func main() {
 func run() error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	store, err := ledger.Open(ctx)
+	_, closeFn, err := ledger.Open(ctx)
 	if err != nil {
 		return err
 	}
-	defer store.Close()
+	defer closeFn()
 	log.Print("Ledger ready; Gateway embeds its own Ledger instance using the same database")
 	<-ctx.Done()
 	return nil

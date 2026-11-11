@@ -1,6 +1,7 @@
 package memory
 
 import (
+	"context"
 	"slices"
 	"sync"
 
@@ -19,7 +20,7 @@ func NewTransactionRepository() *TransactionRepository {
 	return &TransactionRepository{}
 }
 
-func (r *TransactionRepository) Add(tx domain.Transaction) (domain.Transaction, error) {
+func (r *TransactionRepository) Add(_ context.Context, tx domain.Transaction) (domain.Transaction, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -31,11 +32,11 @@ func (r *TransactionRepository) Add(tx domain.Transaction) (domain.Transaction, 
 }
 
 // List возвращает копию, чтобы вызывающий код не мог изменить внутреннее состояние хранилища.
-func (r *TransactionRepository) List() []domain.Transaction {
+func (r *TransactionRepository) List(_ context.Context) ([]domain.Transaction, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	return slices.Clone(r.txs)
+	return slices.Clone(r.txs), nil
 }
 
 func (r *TransactionRepository) GetAllTransactionByCategory(category string, period domain.Period) []domain.Transaction {

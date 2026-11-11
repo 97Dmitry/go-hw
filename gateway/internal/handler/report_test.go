@@ -9,7 +9,7 @@ import (
 	"github.com/97Dmitry/go-hw/ledger"
 )
 
-type brokenStore struct{ *ledger.Ledger }
+type brokenStore struct{ ledger.Service }
 
 func (brokenStore) ListBudgets() ([]ledger.Budget, error) {
 	return nil, errors.New("database unavailable")
