@@ -9,10 +9,10 @@ import (
 )
 
 type Service interface {
-	SetBudget(domain.Budget) (domain.Budget, error)
-	ListBudgets() ([]domain.Budget, error)
-	AddTransaction(domain.Transaction) (domain.Transaction, error)
-	ListTransactions() ([]domain.Transaction, error)
+	SetBudget(context.Context, domain.Budget) (domain.Budget, error)
+	ListBudgets(context.Context) ([]domain.Budget, error)
+	AddTransaction(context.Context, domain.Transaction) (domain.Transaction, error)
+	ListTransactions(context.Context) ([]domain.Transaction, error)
 	GetReportSummary(context.Context, time.Time, time.Time) ([]domain.CategoryTotal, error)
 }
 
@@ -27,12 +27,12 @@ func New(b domain.BudgetRepository, t domain.TransactionRepository, work domain.
 	return &Application{budgets: b, transactions: t, work: work, cache: cache}
 }
 
-func (s *Application) SetBudget(b domain.Budget) (saved domain.Budget, err error) {
+func (s *Application) SetBudget(ctx context.Context, b domain.Budget) (saved domain.Budget, err error) {
 	if err = b.Validate(); err != nil {
 		return
 	}
 	b.Period = domain.MonthPeriod(b.Period.Start)
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	err = s.work.WithinTransaction(ctx, func(budgets domain.BudgetRepository, _ domain.TransactionRepository) error {
 		saved, err = budgets.Set(ctx, b)
@@ -41,17 +41,17 @@ func (s *Application) SetBudget(b domain.Budget) (saved domain.Budget, err error
 	return
 }
 
-func (s *Application) ListBudgets() ([]domain.Budget, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+func (s *Application) ListBudgets(ctx context.Context) ([]domain.Budget, error) {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	return s.budgets.List(ctx)
 }
 
-func (s *Application) AddTransaction(t domain.Transaction) (saved domain.Transaction, err error) {
+func (s *Application) AddTransaction(ctx context.Context, t domain.Transaction) (saved domain.Transaction, err error) {
 	if err = t.Validate(); err != nil {
 		return
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	err = s.work.WithinTransaction(ctx, func(budgets domain.BudgetRepository, transactions domain.TransactionRepository) error {
 		budget, err := budgets.GetByCategory(ctx, t.Category, t.Date)
@@ -71,8 +71,8 @@ func (s *Application) AddTransaction(t domain.Transaction) (saved domain.Transac
 	return
 }
 
-func (s *Application) ListTransactions() ([]domain.Transaction, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+func (s *Application) ListTransactions(ctx context.Context) ([]domain.Transaction, error) {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	return s.transactions.List(ctx)
 }

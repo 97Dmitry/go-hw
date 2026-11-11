@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -11,10 +12,10 @@ import (
 
 type brokenStore struct{ ledger.Service }
 
-func (brokenStore) ListBudgets() ([]ledger.Budget, error) {
+func (brokenStore) ListBudgets(context.Context) ([]ledger.Budget, error) {
 	return nil, errors.New("database unavailable")
 }
-func (brokenStore) ListTransactions() ([]ledger.Transaction, error) {
+func (brokenStore) ListTransactions(context.Context) ([]ledger.Transaction, error) {
 	return nil, errors.New("database unavailable")
 }
 

@@ -20,9 +20,13 @@ func NewTransactionRepository() *TransactionRepository {
 	return &TransactionRepository{}
 }
 
-func (r *TransactionRepository) Add(_ context.Context, tx domain.Transaction) (domain.Transaction, error) {
+func (r *TransactionRepository) Add(ctx context.Context, tx domain.Transaction) (domain.Transaction, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+
+	if err := ctx.Err(); err != nil {
+		return domain.Transaction{}, err
+	}
 
 	r.lastID++
 	tx.ID = r.lastID
@@ -32,28 +36,13 @@ func (r *TransactionRepository) Add(_ context.Context, tx domain.Transaction) (d
 }
 
 // List возвращает копию, чтобы вызывающий код не мог изменить внутреннее состояние хранилища.
-func (r *TransactionRepository) List(_ context.Context) ([]domain.Transaction, error) {
+func (r *TransactionRepository) List(ctx context.Context) ([]domain.Transaction, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	return slices.Clone(r.txs), nil
-}
-
-func (r *TransactionRepository) GetAllTransactionByCategory(category string, period domain.Period) []domain.Transaction {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-
-	result := make([]domain.Transaction, 0)
-
-	for _, tx := range r.txs {
-		if tx.Category != category {
-			continue
-		}
-
-		if period.InPeriod(tx.Date) {
-			result = append(result, tx)
-		}
+	if err := ctx.Err(); err != nil {
+		return nil, err
 	}
 
-	return result
+	return slices.Clone(r.txs), nil
 }

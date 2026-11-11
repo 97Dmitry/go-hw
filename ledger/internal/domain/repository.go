@@ -17,7 +17,7 @@ type TransactionRepository interface {
 	Add(context.Context, Transaction) (Transaction, error)
 	List(context.Context) ([]Transaction, error)
 	SumByCategory(context.Context, string, Period) (int64, error) // integer cents
-	Summary(context.Context, time.Time, time.Time) ([]CategoryTotal, error)
+	Categories(context.Context, Period) ([]string, error)
 }
 
 // UnitOfWork serializes budget changes and expenses for the same monthly budget.

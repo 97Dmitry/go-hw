@@ -37,9 +37,13 @@ func NewBudgetRepository() *BudgetRepository {
 	}
 }
 
-func (r *BudgetRepository) Add(_ context.Context, b domain.Budget) (domain.Budget, error) {
+func (r *BudgetRepository) Add(ctx context.Context, b domain.Budget) (domain.Budget, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+
+	if err := ctx.Err(); err != nil {
+		return domain.Budget{}, err
+	}
 
 	key := keyOf(b.Category, b.Period.Start)
 	if _, ok := r.budgets[key]; ok {
@@ -54,9 +58,13 @@ func (r *BudgetRepository) Add(_ context.Context, b domain.Budget) (domain.Budge
 }
 
 // Set создаёт бюджет или заменяет существующий на тот же месяц, сохраняя его ID.
-func (r *BudgetRepository) Set(_ context.Context, b domain.Budget) (domain.Budget, error) {
+func (r *BudgetRepository) Set(ctx context.Context, b domain.Budget) (domain.Budget, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+
+	if err := ctx.Err(); err != nil {
+		return domain.Budget{}, err
+	}
 
 	key := keyOf(b.Category, b.Period.Start)
 	if existing, ok := r.budgets[key]; ok {
@@ -71,9 +79,13 @@ func (r *BudgetRepository) Set(_ context.Context, b domain.Budget) (domain.Budge
 }
 
 // GetByCategory возвращает бюджет категории на месяц, в который попадает date.
-func (r *BudgetRepository) GetByCategory(_ context.Context, category string, date time.Time) (domain.Budget, error) {
+func (r *BudgetRepository) GetByCategory(ctx context.Context, category string, date time.Time) (domain.Budget, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
+
+	if err := ctx.Err(); err != nil {
+		return domain.Budget{}, err
+	}
 
 	b, ok := r.budgets[keyOf(category, date)]
 	if !ok {
@@ -83,9 +95,13 @@ func (r *BudgetRepository) GetByCategory(_ context.Context, category string, dat
 	return b, nil
 }
 
-func (r *BudgetRepository) List(_ context.Context) ([]domain.Budget, error) {
+func (r *BudgetRepository) List(ctx context.Context) ([]domain.Budget, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
+
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 
 	return slices.Collect(maps.Values(r.budgets)), nil
 }

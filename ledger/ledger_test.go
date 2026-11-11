@@ -1,6 +1,7 @@
 package ledger_test
 
 import (
+	"context"
 	"errors"
 	"reflect"
 	"testing"
@@ -71,14 +72,14 @@ func TestLedgerBudgetLimit(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			store := ledger.New()
 			date := time.Date(2026, 10, 15, 0, 0, 0, 0, time.UTC)
-			if _, err := store.SetBudget(ledger.Budget{Category: "еда", Limit: 5000, Period: ledger.MonthPeriod(date)}); err != nil {
+			if _, err := store.SetBudget(context.Background(), ledger.Budget{Category: "еда", Limit: 5000, Period: ledger.MonthPeriod(date)}); err != nil {
 				t.Fatal(err)
 			}
-			first, err := store.AddTransaction(ledger.Transaction{Amount: 1000, Category: "еда", Date: date})
+			first, err := store.AddTransaction(context.Background(), ledger.Transaction{Amount: 1000, Category: "еда", Date: date})
 			if err != nil {
 				t.Fatal(err)
 			}
-			saved, err := store.AddTransaction(ledger.Transaction{Amount: tc.amount, Category: "еда", Date: date})
+			saved, err := store.AddTransaction(context.Background(), ledger.Transaction{Amount: tc.amount, Category: "еда", Date: date})
 			if !errors.Is(err, tc.wantErr) {
 				t.Fatalf("AddTransaction() error = %v, want %v", err, tc.wantErr)
 			}
@@ -89,7 +90,7 @@ func TestLedgerBudgetLimit(t *testing.T) {
 				}
 				want = append(want, saved)
 			}
-			if got, err := store.ListTransactions(); err != nil || !reflect.DeepEqual(got, want) {
+			if got, err := store.ListTransactions(context.Background()); err != nil || !reflect.DeepEqual(got, want) {
 				t.Fatalf("transactions = %+v, want %+v", got, want)
 			}
 		})
@@ -99,17 +100,17 @@ func TestLedgerBudgetLimit(t *testing.T) {
 func TestLedgerIsolation(t *testing.T) {
 	first, second := ledger.New(), ledger.New()
 	date := time.Date(2026, 10, 15, 0, 0, 0, 0, time.UTC)
-	if _, err := first.SetBudget(ledger.Budget{Category: "еда", Limit: 5000, Period: ledger.MonthPeriod(date)}); err != nil {
+	if _, err := first.SetBudget(context.Background(), ledger.Budget{Category: "еда", Limit: 5000, Period: ledger.MonthPeriod(date)}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := first.AddTransaction(ledger.Transaction{Amount: 100, Category: "еда", Date: date}); err != nil {
+	if _, err := first.AddTransaction(context.Background(), ledger.Transaction{Amount: 100, Category: "еда", Date: date}); err != nil {
 		t.Fatal(err)
 	}
-	budgets, err := second.ListBudgets()
+	budgets, err := second.ListBudgets(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
-	txs, err := second.ListTransactions()
+	txs, err := second.ListTransactions(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -140,18 +141,18 @@ func TestMoneyValidCents(t *testing.T) {
 func TestExactCentsLimit(t *testing.T) {
 	store := ledger.New()
 	date := time.Now()
-	if _, err := store.SetBudget(ledger.Budget{Category: "cents", Limit: 0.30, Period: ledger.MonthPeriod(date)}); err != nil {
+	if _, err := store.SetBudget(context.Background(), ledger.Budget{Category: "cents", Limit: 0.30, Period: ledger.MonthPeriod(date)}); err != nil {
 		t.Fatal(err)
 	}
 	for _, amount := range []float64{0.10, 0.20} {
-		if _, err := store.AddTransaction(ledger.Transaction{Category: "cents", Amount: amount, Date: date}); err != nil {
+		if _, err := store.AddTransaction(context.Background(), ledger.Transaction{Category: "cents", Amount: amount, Date: date}); err != nil {
 			t.Fatalf("exact cents rejected: %v", err)
 		}
 	}
-	if _, err := store.AddTransaction(ledger.Transaction{Category: "cents", Amount: 0.01, Date: date}); !errors.Is(err, ledger.ErrBudgetExceeded) {
+	if _, err := store.AddTransaction(context.Background(), ledger.Transaction{Category: "cents", Amount: 0.01, Date: date}); !errors.Is(err, ledger.ErrBudgetExceeded) {
 		t.Fatalf("extra cent accepted: %v", err)
 	}
-	txs, err := store.ListTransactions()
+	txs, err := store.ListTransactions(context.Background())
 	if err != nil || len(txs) != 2 {
 		t.Fatalf("rejected expense saved: %v %v", txs, err)
 	}
@@ -160,13 +161,13 @@ func TestExactCentsLimit(t *testing.T) {
 func TestConcurrentExpenses(t *testing.T) {
 	store := ledger.New()
 	date := time.Now()
-	if _, err := store.SetBudget(ledger.Budget{Category: "concurrent", Limit: 100, Period: ledger.MonthPeriod(date)}); err != nil {
+	if _, err := store.SetBudget(context.Background(), ledger.Budget{Category: "concurrent", Limit: 100, Period: ledger.MonthPeriod(date)}); err != nil {
 		t.Fatal(err)
 	}
 	results := make(chan error, 20)
 	for range 20 {
 		go func() {
-			_, err := store.AddTransaction(ledger.Transaction{Category: "concurrent", Amount: 60, Date: date})
+			_, err := store.AddTransaction(context.Background(), ledger.Transaction{Category: "concurrent", Amount: 60, Date: date})
 			results <- err
 		}()
 	}
@@ -181,5 +182,58 @@ func TestConcurrentExpenses(t *testing.T) {
 	}
 	if successes != 1 {
 		t.Fatalf("want one success, got %d", successes)
+	}
+}
+
+func TestReportPeriod(t *testing.T) {
+	store := ledger.New()
+	ctx := context.Background()
+	from := time.Date(2026, 11, 2, 0, 0, 0, 0, time.UTC)
+	to := from.AddDate(0, 0, 1)
+	for _, category := range []string{"food", "transport"} {
+		if _, err := store.SetBudget(ctx, ledger.Budget{Category: category, Limit: 100, Period: ledger.MonthPeriod(from)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, tx := range []ledger.Transaction{
+		{Category: "food", Amount: 0.10, Date: from.AddDate(0, 0, -1)},
+		{Category: "food", Amount: 0.20, Date: from},
+		{Category: "transport", Amount: 0.30, Date: from},
+		{Category: "food", Amount: 0.40, Date: to},
+	} {
+		if _, err := store.AddTransaction(ctx, tx); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, err := store.GetReportSummary(ctx, from, to)
+	want := []ledger.CategoryTotal{{Category: "food", Total: 0.20}, {Category: "transport", Total: 0.30}}
+	if err != nil || !reflect.DeepEqual(got, want) {
+		t.Fatalf("report interval: %v %v", got, err)
+	}
+	empty, err := store.GetReportSummary(ctx, to.AddDate(0, 0, 1), to.AddDate(0, 0, 2))
+	if err != nil || empty == nil || len(empty) != 0 {
+		t.Fatalf("empty report: %v %v", empty, err)
+	}
+}
+
+func TestCanceledServiceOperations(t *testing.T) {
+	store := ledger.New()
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := store.SetBudget(ctx, ledger.Budget{Category: "food", Limit: 100, Period: ledger.MonthPeriod(time.Now())}); !errors.Is(err, context.Canceled) {
+		t.Fatalf("set: %v", err)
+	}
+	if _, err := store.AddTransaction(ctx, ledger.Transaction{Category: "food", Amount: 1, Date: time.Now()}); !errors.Is(err, context.Canceled) {
+		t.Fatalf("add: %v", err)
+	}
+	if _, err := store.ListBudgets(ctx); !errors.Is(err, context.Canceled) {
+		t.Fatalf("budgets: %v", err)
+	}
+	if _, err := store.ListTransactions(ctx); !errors.Is(err, context.Canceled) {
+		t.Fatalf("transactions: %v", err)
+	}
+	budgets, err := store.ListBudgets(context.Background())
+	if err != nil || len(budgets) != 0 {
+		t.Fatalf("canceled write persisted: %v %v", budgets, err)
 	}
 }

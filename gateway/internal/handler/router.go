@@ -13,6 +13,10 @@ import (
 )
 
 func NewRouter(store ledger.Service) http.Handler {
+	return NewRouterWithTimeout(store, DefaultRequestTimeout)
+}
+
+func NewRouterWithTimeout(store ledger.Service, timeout time.Duration) http.Handler {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("/", func(w http.ResponseWriter, _ *http.Request) {
@@ -34,7 +38,7 @@ func NewRouter(store ledger.Service) http.Handler {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
-		saved, err := store.AddTransaction(tx)
+		saved, err := store.AddTransaction(r.Context(), tx)
 		if err != nil {
 			switch {
 			case errors.Is(err, ledger.ErrBudgetExceeded):
@@ -42,20 +46,18 @@ func NewRouter(store ledger.Service) http.Handler {
 			case errors.Is(err, ledger.ErrBudgetNotFound):
 				writeError(w, http.StatusConflict, "budget not found")
 			default:
-				log.Printf("add transaction: %v", err)
-				writeError(w, http.StatusInternalServerError, "internal server error")
+				writeServiceError(w, "add transaction", err)
 			}
 			return
 		}
 		writeJSON(w, http.StatusCreated, api.TransactionFromDomain(saved))
 	})
 
-	mux.HandleFunc("GET /api/transactions", func(w http.ResponseWriter, _ *http.Request) {
+	mux.HandleFunc("GET /api/transactions", func(w http.ResponseWriter, r *http.Request) {
 		result := make([]api.TransactionResponse, 0)
-		txs, err := store.ListTransactions()
+		txs, err := store.ListTransactions(r.Context())
 		if err != nil {
-			log.Printf("list transactions: %v", err)
-			writeError(w, 500, "internal server error")
+			writeServiceError(w, "list transactions", err)
 			return
 		}
 		for _, tx := range txs {
@@ -75,21 +77,19 @@ func NewRouter(store ledger.Service) http.Handler {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
-		saved, err := store.SetBudget(budget)
+		saved, err := store.SetBudget(r.Context(), budget)
 		if err != nil {
-			log.Printf("set budget: %v", err)
-			writeError(w, http.StatusInternalServerError, "internal server error")
+			writeServiceError(w, "set budget", err)
 			return
 		}
 		writeJSON(w, http.StatusCreated, api.BudgetFromDomain(saved))
 	})
 
-	mux.HandleFunc("GET /api/budgets", func(w http.ResponseWriter, _ *http.Request) {
+	mux.HandleFunc("GET /api/budgets", func(w http.ResponseWriter, r *http.Request) {
 		result := make([]api.BudgetResponse, 0)
-		budgets, err := store.ListBudgets()
+		budgets, err := store.ListBudgets(r.Context())
 		if err != nil {
-			log.Printf("list budgets: %v", err)
-			writeError(w, 500, "internal server error")
+			writeServiceError(w, "list budgets", err)
 			return
 		}
 		for _, b := range budgets {
@@ -106,13 +106,12 @@ func NewRouter(store ledger.Service) http.Handler {
 		}
 		result, err := store.GetReportSummary(r.Context(), from, to)
 		if err != nil {
-			log.Printf("report summary: %v", err)
-			writeError(w, 500, "internal server error")
+			writeServiceError(w, "report summary", err)
 			return
 		}
 		writeJSON(w, 200, result)
 	})
-	return logging(jsonContentType(mux))
+	return logging(requestTimeout(jsonContentType(mux), timeout))
 }
 
 func readJSON(r *http.Request, dst any) error {
@@ -134,7 +133,7 @@ func readJSON(r *http.Request, dst any) error {
 func writeJSON(w http.ResponseWriter, status int, value any) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(status)
-	if err := json.NewEncoder(w).Encode(value); err != nil {
+	if err := json.NewEncoder(w).Encode(value); err != nil && !errors.Is(err, http.ErrHandlerTimeout) {
 		log.Printf("write response: %v", err)
 	}
 }

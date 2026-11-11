@@ -42,10 +42,10 @@ func TestSumFailureDoesNotInsert(t *testing.T) {
 	txs := failingTransactions{TransactionRepository: store.Transactions, err: failure}
 	// Reads must use the transaction-bound repository, not the outer repository.
 	app := service.New(store.Budgets, store.Transactions, work{store.Budgets, txs}, nil)
-	if _, err := app.AddTransaction(domain.Transaction{Category: "food", Amount: 0.01, Date: date}); !errors.Is(err, failure) {
+	if _, err := app.AddTransaction(context.Background(), domain.Transaction{Category: "food", Amount: 0.01, Date: date}); !errors.Is(err, failure) {
 		t.Fatalf("want repository error, got %v", err)
 	}
-	saved, err := app.ListTransactions()
+	saved, err := app.ListTransactions(context.Background())
 	if err != nil || len(saved) != 0 {
 		t.Fatalf("saved after failure: %v %v", saved, err)
 	}
@@ -53,10 +53,10 @@ func TestSumFailureDoesNotInsert(t *testing.T) {
 
 func TestValidationBeforeRepositories(t *testing.T) {
 	app := service.New(nil, nil, nil, nil)
-	if _, err := app.AddTransaction(domain.Transaction{Amount: 0, Category: "food"}); !errors.Is(err, domain.ErrInvalidAmount) {
+	if _, err := app.AddTransaction(context.Background(), domain.Transaction{Amount: 0, Category: "food"}); !errors.Is(err, domain.ErrInvalidAmount) {
 		t.Fatalf("invalid transaction: %v", err)
 	}
-	if _, err := app.SetBudget(domain.Budget{}); err == nil {
+	if _, err := app.SetBudget(context.Background(), domain.Budget{}); err == nil {
 		t.Fatal("invalid budget accepted")
 	}
 }

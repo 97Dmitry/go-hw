@@ -78,19 +78,19 @@ func (s *TransactionRepository) List(ctx context.Context) ([]domain.Transaction,
 	}
 	return result, rows.Err()
 }
-func (s *TransactionRepository) Summary(ctx context.Context, from, to time.Time) ([]domain.CategoryTotal, error) {
-	rows, err := s.query.QueryContext(ctx, `SELECT category,SUM(amount) FROM expenses WHERE date >= $1 AND date < $2 GROUP BY category ORDER BY category`, from, to)
+func (s *TransactionRepository) Categories(ctx context.Context, period domain.Period) ([]string, error) {
+	rows, err := s.query.QueryContext(ctx, `SELECT DISTINCT category FROM expenses WHERE date >= $1 AND date < $2 ORDER BY category`, period.Start, period.End)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	result := make([]domain.CategoryTotal, 0)
+	result := make([]string, 0)
 	for rows.Next() {
-		var r domain.CategoryTotal
-		if err := rows.Scan(&r.Category, &r.Total); err != nil {
+		var category string
+		if err := rows.Scan(&category); err != nil {
 			return nil, err
 		}
-		result = append(result, r)
+		result = append(result, category)
 	}
 	return result, rows.Err()
 }

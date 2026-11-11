@@ -2,8 +2,10 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"net/http"
+	"os"
 	"time"
 
 	"github.com/97Dmitry/go-hw/gateway/internal/handler"
@@ -17,6 +19,15 @@ func main() {
 }
 
 func run() error {
+	timeout := handler.DefaultRequestTimeout
+	if value := os.Getenv("HTTP_REQUEST_TIMEOUT"); value != "" {
+		parsed, err := time.ParseDuration(value)
+		if err != nil || parsed <= 0 {
+			return fmt.Errorf("HTTP_REQUEST_TIMEOUT must be a positive duration")
+		}
+		timeout = parsed
+	}
+
 	store, closeFn, err := ledger.Open(context.Background())
 	if err != nil {
 		return err
@@ -24,7 +35,7 @@ func run() error {
 	defer closeFn()
 	srv := &http.Server{
 		Addr:              ":8081",
-		Handler:           handler.NewRouter(store),
+		Handler:           handler.NewRouterWithTimeout(store, timeout),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 

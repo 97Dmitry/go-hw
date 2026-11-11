@@ -28,17 +28,17 @@ func TestPersistence(t *testing.T) {
 	zone := time.FixedZone("test-offset", -5*60*60)
 	b.Period.Start = b.Period.Start.In(zone)
 	b.Period.End = b.Period.End.In(zone)
-	first, err := store.SetBudget(b)
+	first, err := store.SetBudget(context.Background(), b)
 	if err != nil {
 		t.Fatal(err)
 	}
 	b.Limit = 90
-	updated, err := store.SetBudget(b)
+	updated, err := store.SetBudget(context.Background(), b)
 	if err != nil || updated.ID != first.ID {
 		t.Fatalf("upsert: %+v %v", updated, err)
 	}
 	b.Period = ledger.MonthPeriod(date.AddDate(0, 1, 0))
-	if _, err := store.SetBudget(b); err != nil {
+	if _, err := store.SetBudget(context.Background(), b); err != nil {
 		t.Fatal(err)
 	}
 	other, closeOther, err := ledger.Open(ctx)
@@ -50,7 +50,7 @@ func TestPersistence(t *testing.T) {
 	results := make(chan error, 2)
 	for _, writer := range []ledger.Service{store, other} {
 		wg.Go(func() {
-			_, err := writer.AddTransaction(ledger.Transaction{Amount: 60, Category: category, Date: date})
+			_, err := writer.AddTransaction(context.Background(), ledger.Transaction{Amount: 60, Category: category, Date: date})
 			results <- err
 		})
 	}
@@ -69,7 +69,7 @@ func TestPersistence(t *testing.T) {
 	if successes != 1 || exceeded != 1 {
 		t.Fatalf("concurrent budget: %d successes, %d exceeded", successes, exceeded)
 	}
-	if _, err := store.AddTransaction(ledger.Transaction{Amount: 1, Category: category, Date: date.AddDate(0, 2, 0)}); !errors.Is(err, ledger.ErrBudgetNotFound) {
+	if _, err := store.AddTransaction(context.Background(), ledger.Transaction{Amount: 1, Category: category, Date: date.AddDate(0, 2, 0)}); !errors.Is(err, ledger.ErrBudgetNotFound) {
 		t.Fatalf("missing monthly budget: %v", err)
 	}
 	from, to := ledger.MonthPeriod(date).Start, ledger.MonthPeriod(date).End
@@ -94,7 +94,7 @@ func TestPersistence(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer closeReopened()
-	txs, err := reopened.ListTransactions()
+	txs, err := reopened.ListTransactions(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -4,7 +4,6 @@ import (
 	"context"
 	"math"
 	"sync"
-	"time"
 
 	"github.com/97Dmitry/go-hw/ledger/internal/domain"
 )
@@ -28,28 +27,42 @@ func (s *Store) WithinTransaction(ctx context.Context, fn func(domain.BudgetRepo
 	return fn(s.Budgets, s.Transactions)
 }
 
-func (r *TransactionRepository) SumByCategory(_ context.Context, category string, period domain.Period) (int64, error) {
+func (r *TransactionRepository) SumByCategory(ctx context.Context, category string, period domain.Period) (int64, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	if err := ctx.Err(); err != nil {
+		return 0, err
+	}
 	var total int64
-	for _, t := range r.GetAllTransactionByCategory(category, period) {
-		total += int64(math.Round(t.Amount * 100))
+	for _, t := range r.txs {
+		if err := ctx.Err(); err != nil {
+			return 0, err
+		}
+		if t.Category == category && period.InPeriod(t.Date) {
+			total += int64(math.Round(t.Amount * 100))
+		}
 	}
 	return total, nil
 }
 
-func (r *TransactionRepository) Summary(ctx context.Context, from, to time.Time) ([]domain.CategoryTotal, error) {
-	txs, err := r.List(ctx)
-	if err != nil {
+func (r *TransactionRepository) Categories(ctx context.Context, period domain.Period) ([]string, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	totals := map[string]int64{}
-	for _, t := range txs {
-		if !t.Date.Before(from) && t.Date.Before(to) {
-			totals[t.Category] += int64(math.Round(t.Amount * 100))
+	categories := map[string]struct{}{}
+	for _, t := range r.txs {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		if period.InPeriod(t.Date) {
+			categories[t.Category] = struct{}{}
 		}
 	}
-	result := make([]domain.CategoryTotal, 0, len(totals))
-	for category, cents := range totals {
-		result = append(result, domain.CategoryTotal{Category: category, Total: float64(cents) / 100})
+	result := make([]string, 0, len(categories))
+	for category := range categories {
+		result = append(result, category)
 	}
 	return result, nil
 }
