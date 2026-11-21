@@ -53,6 +53,12 @@ func NewRouterWithTimeout(store ledger.Service, timeout time.Duration) http.Hand
 		writeJSON(w, http.StatusCreated, api.TransactionFromDomain(saved))
 	})
 
+	mux.HandleFunc("POST /api/transactions/bulk", importTransactions(store))
+	mux.HandleFunc("/api/transactions/bulk", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Allow", "POST")
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+	})
+
 	mux.HandleFunc("GET /api/transactions", func(w http.ResponseWriter, r *http.Request) {
 		result := make([]api.TransactionResponse, 0)
 		txs, err := store.ListTransactions(r.Context())
@@ -123,7 +129,7 @@ func readJSON(r *http.Request, dst any) error {
 	var extra any
 	if err := dec.Decode(&extra); err != io.EOF {
 		if err == nil {
-			return errors.New("request body must contain one JSON object")
+			return errors.New("request body must contain one JSON value")
 		}
 		return err
 	}

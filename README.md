@@ -14,8 +14,37 @@ Gateway предоставляет HTTP API, Ledger хранит помесяч�
 | POST | `/api/budgets` | Создать/обновить бюджет категории на текущий месяц UTC |
 | GET | `/api/budgets` | Список бюджетов из PostgreSQL |
 | POST | `/api/transactions` | Добавить расход в пределах месячного бюджета |
+| POST | `/api/transactions/bulk?workers=4` | Импортировать массив расходов с отчётом по отклонённым строкам |
 | GET | `/api/transactions` | Список расходов из PostgreSQL |
 | GET | `/api/reports/summary?from=YYYY-MM-DD&to=YYYY-MM-DD` | Сумма расходов по категориям за `[from,to)`, кеш Redis |
+
+## Пакетный импорт расходов
+
+`POST /api/transactions/bulk` принимает JSON-массив объектов с полями `amount`, `category`, `description` и `date` в том же формате, что и одиночный `POST /api/transactions`. Поле `date` передаётся в RFC 3339. Необязательный query-параметр `workers` задаёт число воркеров от **1 до 32**, по умолчанию **4**. Некорректный параметр, синтаксис JSON или формат полей, включая строку `date` в другом формате, дают `400` до начала импорта.
+
+После обработки пакета Gateway возвращает `200 OK`, даже если часть или все расходы отклонены. `accepted` и `rejected` содержат количество сохранённых и отклонённых расходов. Индексы в `errors` начинаются с нуля и отсортированы по позиции в исходном массиве. Для пустого массива ответ содержит нулевые счётчики и `"errors":[]`.
+
+Ledger проводит каждый расход отдельной транзакцией с проверкой месячного бюджета. При ограниченном остатке порядок сохранения расходов с несколькими воркерами зависит от выполнения пула; `workers=1` обрабатывает расходы по порядку входного массива. При отмене или таймауте Ledger возвращает частичную сводку и ошибку контекста, а Gateway отвечает `504` с `{"error":"request timeout"}`. Успешно сохранённые расходы остаются в базе, поэтому повтор всего пакета может создать дубликаты.
+
+```bash
+category="bulk-food-$(date +%s)"
+date_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+
+curl -fsS http://localhost:8081/api/budgets \
+  -H 'Content-Type: application/json' \
+  -d "{\"category\":\"$category\",\"limit\":100}"
+
+curl -i 'http://localhost:8081/api/transactions/bulk?workers=4' \
+  -H 'Content-Type: application/json' \
+  --data-binary @- <<EOF
+[
+  {"amount":60,"category":"$category","description":"lunch","date":"$date_utc"},
+  {"amount":120,"category":"$category","description":"over limit","date":"$date_utc"}
+]
+EOF
+
+# 200 OK: {"accepted":1,"rejected":1,"errors":[{"index":1,"error":"budget exceeded"}]}
+```
 
 ## Проверка
 

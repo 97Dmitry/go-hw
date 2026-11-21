@@ -10,8 +10,13 @@ type Transaction = domain.Transaction
 type Budget = domain.Budget
 type Period = domain.Period
 type CategoryTotal = domain.CategoryTotal
+type ImportSummary = service.ImportSummary
+type ImportError = service.ImportError
 type Service = service.Service
+
+const DefaultImportWorkers = service.DefaultImportWorkers
 
 var ErrBudgetExceeded = domain.ErrBudgetExceeded
 var ErrBudgetNotFound = domain.ErrBudgetNotFound
+var ErrInvalidImportWorkers = service.ErrInvalidImportWorkers
 var MonthPeriod = domain.MonthPeriod
