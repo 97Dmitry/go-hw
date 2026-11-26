@@ -4,22 +4,22 @@
 
 ## Запуск
 
+[Контейнерный запуск Gateway](../README.md#запуск-в-docker-compose) публикует порт 8080. Ниже описан запуск Gateway из Go-кода.
+
 Из корня проекта создайте PostgreSQL и Redis и примените миграции по [инструкции Ledger](../ledger/README.md). Краткий порядок:
 
 ```bash
-docker compose up -d --wait
+docker compose up -d --wait db redis
 export DATABASE_URL='postgres://postgres:postgres@localhost:55432/cashapp?sslmode=disable'
 export REDIS_ADDR='localhost:56379'
 export REDIS_DB=0
 export REDIS_PASSWORD=''
 # Установка Goose описана в ledger/README.md
 goose -dir ./ledger/migrations postgres "$DATABASE_URL" up
-make start-ledger
-# В другом терминале с теми же env:
 make start-gateway
 ```
 
-Gateway слушает `localhost:8081` (сервер привязан к `:8081`). Ошибки подключения PostgreSQL/Redis останавливают запуск. `DATABASE_URL` имеет приоритет над `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASS`, `DB_NAME`. Значения по умолчанию и команды отката `goose … down` описаны в Ledger README.
+По умолчанию Gateway слушает `:8081`. Переменная `HTTP_ADDR` задаёт адрес прослушивания, в образе задано `:8080`. Ошибки подключения PostgreSQL/Redis останавливают запуск. `DATABASE_URL` имеет приоритет над `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASS`, `DB_NAME`. Значения по умолчанию и команды отката `goose … down` описаны в Ledger README.
 
 ## HTTP-проверка
 
@@ -57,7 +57,7 @@ curl -i "http://localhost:8081/api/reports/summary?from=$from&to=$to"
 
 Для отчёта обе даты обязательны, формат `YYYY-MM-DD`, `from < to`, верхняя граница исключена. Ответ — `[{"category":"food-…","total":60}]`. Если этот интервал уже запрашивали, кеш может содержать предыдущие значения до истечения 30 секунд.
 
-Перезапустите Ledger и Gateway и повторите GET списков: данные должны сохраниться. При необходимости проверьте таблицы read-only запросами:
+Перезапустите Gateway и повторите GET списков: данные должны сохраниться. При необходимости проверьте таблицы read-only запросами:
 
 ```bash
 psql "$DATABASE_URL" -c 'SELECT id, category, month, limit_amount FROM budgets ORDER BY id;'

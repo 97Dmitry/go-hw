@@ -7,7 +7,7 @@ Ledger хранит бюджеты и расходы в PostgreSQL, отчёты
 Команды ниже выполняются из корня репозитория. Требуются Go 1.27.1+, Docker Compose.
 
 ```bash
-docker compose up -d --wait
+docker compose up -d --wait db redis
 export DATABASE_URL='postgres://postgres:postgres@localhost:55432/cashapp?sslmode=disable'
 export REDIS_ADDR='localhost:56379'
 export REDIS_DB=0

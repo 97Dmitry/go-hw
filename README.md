@@ -7,10 +7,99 @@ Gateway предоставляет HTTP API, Ledger хранит помесяч�
 - [Ledger: создание БД, установка Goose, миграции up/down, env, бизнес-правила и кеш](ledger/README.md).
 - [Gateway: запуск и cURL, включая повторный запрос отчёта](gateway/README.md).
 
-Порядок: PostgreSQL/Redis → `goose up` → Ledger → Gateway → HTTP-проверка. Подробные команды находятся в README сервисов.
+## Запуск в Docker Compose
+
+Команды выполняются из корня репозитория. Нужны Docker с BuildKit, Docker Compose 2.17+ и [Goose](ledger/README.md#postgresql-redis-и-миграции).
+
+1. Запустите PostgreSQL и дождитесь статуса `healthy`.
+
+   ```bash
+   docker compose up -d --wait db
+   docker compose ps db
+   ```
+
+2. Примените миграции с хоста через опубликованный порт PostgreSQL.
+
+   ```bash
+   export DATABASE_URL='postgres://postgres:postgres@localhost:55432/cashapp?sslmode=disable'
+   goose -dir ./ledger/migrations postgres "$DATABASE_URL" up
+   ```
+
+3. Соберите и запустите Gateway. Compose дождётся готовности `db` и `redis`.
+
+   ```bash
+   docker compose up -d --build --wait gateway
+   docker compose ps
+   ```
+
+   Gateway обращается к `db:5432` и `redis:6379` внутри сети Compose. Redis нужен Ledger для кеша отчётов и проверяется при старте приложения. Оба Go-модуля компилируются в бинарь Gateway. Для этого сборка читает `./gateway` и дополнительный контекст `./ledger`, который соответствует `replace => ../ledger` в `gateway/go.mod`.
+
+4. Проверьте HTTP из контейнера и с хоста. Обе команды должны вернуть `pong`.
+
+   ```bash
+   docker compose exec -T gateway wget -qO- http://127.0.0.1:8080/ping
+   curl -fsS http://localhost:8080/ping
+   ```
+
+Для PostgreSQL 18 используется отдельный том `cashapp-pg18-data`. Если вы запускали прежний стенд с PostgreSQL 17, его данные остаются в старом томе `cashapp-data`. Для переноса данных используйте экспорт из PostgreSQL 17 и импорт в PostgreSQL 18.
+
+### Проверка HTTP API
+
+Пример для bash/zsh на Linux/WSL. Для отчёта используйте интервал текущего месяца UTC.
+
+```bash
+base=http://localhost:8080
+category="docker-check-$(date +%s)"
+date_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+from=$(date -u +%Y-%m-01)
+to=$(date -u -d "$from +1 month" +%Y-%m-%d)
+
+# 201. Создать бюджет на 100
+curl -fsS "$base/api/budgets" -H 'Content-Type: application/json' \
+  -d "{\"category\":\"$category\",\"limit\":100}"
+
+# 201. Добавить расход на 30
+curl -fsS "$base/api/transactions" -H 'Content-Type: application/json' \
+  -d "{\"category\":\"$category\",\"amount\":30,\"description\":\"single\",\"date\":\"$date_utc\"}"
+
+# 200. Импортировать расход на 20, ожидается accepted=1
+curl -fsS "$base/api/transactions/bulk" -H 'Content-Type: application/json' \
+  -d "[{\"category\":\"$category\",\"amount\":20,\"description\":\"bulk\",\"date\":\"$date_utc\"}]"
+
+# 200. Убедиться, что в списках есть новый бюджет и два расхода
+curl -fsS "$base/api/budgets"
+curl -fsS "$base/api/transactions"
+
+# 200. Для новой категории ожидается total=50
+curl -fsS "$base/api/reports/summary?from=$from&to=$to"
+```
+
+Если этот интервал запрашивали в последние 30 секунд, дождитесь истечения TTL кеша отчёта и повторите GET.
+
+### Сборка и запуск через Docker CLI
+
+Соберите оба образа из корня репозитория. Образ Ledger предназначен для отдельной проверки сборки.
+
+```bash
+docker build --build-context ledger=./ledger -t cashapp-gateway ./gateway
+docker build -t cashapp-ledger ./ledger
+```
+
+С запущенными `db` и `redis` и применёнными миграциями освободите порт 8080 командой `docker compose stop gateway`. Затем запустите Gateway в сети Compose.
+
+```bash
+docker run --rm --network go-hw-2_default -p 8080:8080 \
+  -e DATABASE_URL='postgres://postgres:postgres@db:5432/cashapp?sslmode=disable' \
+  -e REDIS_ADDR=redis:6379 cashapp-gateway
+```
+
+В другом терминале выполните `curl -fsS http://localhost:8080/ping`. Для остановки контейнера нажмите Ctrl+C в терминале с `docker run`. Команда `docker compose down` останавливает стенд и сохраняет том PostgreSQL.
+
+## HTTP API
 
 | Метод | Путь | Назначение |
 | --- | --- | --- |
+| GET | `/ping` | Проверка доступности HTTP, ответ `pong` |
 | POST | `/api/budgets` | Создать/обновить бюджет категории на текущий месяц UTC |
 | GET | `/api/budgets` | Список бюджетов из PostgreSQL |
 | POST | `/api/transactions` | Добавить расход в пределах месячного бюджета |

@@ -19,6 +19,11 @@ func NewRouter(store ledger.Service) http.Handler {
 func NewRouterWithTimeout(store ledger.Service, timeout time.Duration) http.Handler {
 	mux := http.NewServeMux()
 
+	mux.HandleFunc("GET /ping", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		_, _ = io.WriteString(w, "pong")
+	})
+
 	mux.HandleFunc("/", func(w http.ResponseWriter, _ *http.Request) {
 		writeError(w, http.StatusNotFound, "not found")
 	})

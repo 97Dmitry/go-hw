@@ -33,8 +33,12 @@ func run() error {
 		return err
 	}
 	defer closeFn()
+	addr := os.Getenv("HTTP_ADDR")
+	if addr == "" {
+		addr = ":8081"
+	}
 	srv := &http.Server{
-		Addr:              ":8081",
+		Addr:              addr,
 		Handler:           handler.NewRouterWithTimeout(store, timeout),
 		ReadHeaderTimeout: 5 * time.Second,
 	}

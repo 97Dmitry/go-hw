@@ -42,6 +42,18 @@ func createBudget(t *testing.T, router http.Handler) api.BudgetResponse {
 	return b
 }
 
+func TestPing(t *testing.T) {
+	router := handler.NewRouter(ledger.New())
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/ping", nil))
+	if rec.Code != http.StatusOK || rec.Body.String() != "pong" {
+		t.Fatalf("GET /ping: status %d, body %q", rec.Code, rec.Body.String())
+	}
+	if got := rec.Header().Get("Content-Type"); got != "text/plain; charset=utf-8" {
+		t.Fatalf("Content-Type = %q", got)
+	}
+}
+
 func TestBudgets(t *testing.T) {
 	t.Run("ok", func(t *testing.T) {
 		router := handler.NewRouter(ledger.New())
